@@ -94,6 +94,8 @@ class _MetricFormatter:
 _metric_formatters: dict[str, _MetricFormatter] = {
     # fmt: off
     "loss":                          _MetricFormatter("Loss",                             90, format_as_float),
+    "bert_loss":                     _MetricFormatter("BERT Loss",                        95, format_as_float),
+    "w2v2_loss":                     _MetricFormatter("wav2vec 2.0 Loss",                 95, format_as_float),
     "contrastive_loss":              _MetricFormatter("Contrastive Loss",                100, format_as_float),
     "ctc_loss":                      _MetricFormatter("CTC Loss",                        100, format_as_float),
     "diversity_loss":                _MetricFormatter("Diversity Loss",                  100, format_as_float),

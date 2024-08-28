@@ -145,22 +145,31 @@ class W2VBertOutput:
     def compute_loss(
         self,
         *,
-        w2v2_loss_weight: float = 1.0,
         bert_loss_weight: float = 1.0,
+        w2v2_loss_weight: float = 1.0,
+        diversity_loss_weight: float = 0.1,
+        feature_penalty_weight: float = 0.0,
         bert_label_smoothing: float = 0.0,
     ) -> W2VBertLoss:
         """Compute the loss.
 
-        :param w2v2_loss_weight:
-            The weight of wav2vec 2.0 loss in loss computation.
         :param bert_loss_weight:
             The weight of masked prediction loss in loss computation.
+        :param w2v2_loss_weight:
+            The weight of wav2vec 2.0 loss in loss computation.
+        :param diversity_loss_weight:
+            The weight of diversity in loss computation.
+        :param feature_penalty_weight:
+            The weight of the feature penalty in loss computation.
         :param bert_label_smoothing:
             The amount of label smoothing when computing masked prediction loss.
         """
         bert_loss = self.compute_bert_loss(label_smoothing=bert_label_smoothing)
 
-        w2v2_loss = self.w2v2_output.compute_loss()
+        w2v2_loss = self.w2v2_output.compute_loss(
+            diversity_loss_weight=diversity_loss_weight,
+            feature_penalty_weight=feature_penalty_weight,
+        )
 
         weighted_bert_loss = bert_loss_weight * bert_loss
         weighted_w2v2_loss = w2v2_loss_weight * w2v2_loss.total
