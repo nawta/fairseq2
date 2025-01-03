@@ -9,6 +9,8 @@ from __future__ import annotations
 import math
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from functools import reduce
+from operator import mul
 from typing import final
 
 import torch
@@ -718,3 +720,188 @@ class Sinusoidal3dPositionEncoder(SinusoidalNdPositionEncoder):
 
         # (1, D_inp, H_inp, W_inp, E) -> (D_inp, H_inp, W_inp, E)
         return freqs.squeeze(0)
+
+
+class RotaryNdPositionEncoder(PositionEncoder):
+    freqs_cos: Tensor
+    freqs_sin: Tensor
+    grid_dims: tuple[int, ...]
+    theta: float
+
+    def __init__(
+        self,
+        encoding_dim: int,
+        grid_dims: tuple[int, ...],
+        *,
+        theta: float = 10_000.0,
+        device: Device | None = None,
+    ) -> None:
+        max_seq_len = reduce(mul, grid_dims, 1)
+
+        super().__init__(encoding_dim, max_seq_len)
+
+        if encoding_dim % 2 != 0:
+            raise ValueError(
+                f"`encoding_dim` must be even, but is {encoding_dim} instead."
+            )
+
+        freqs_cos = torch.empty(
+            (max_seq_len, encoding_dim), device=device, dtype=torch.float32
+        )
+
+        freqs_sin = torch.empty(
+            (max_seq_len, encoding_dim), device=device, dtype=torch.float32
+        )
+
+        self.register_buffer("freqs_cos", freqs_cos, persistent=False)
+        self.register_buffer("freqs_sin", freqs_sin, persistent=False)
+
+        self.grid_dims = grid_dims
+        self.theta = theta
+
+    def reset_parameters(self) -> None:
+        """Reset the parameters and buffers of the module."""
+        self.reset_non_persistent_buffers()
+
+    @abstractmethod
+    def reset_non_persistent_buffers(self) -> None:
+        """Reset the non-persistent buffers of the module."""
+
+    def extra_repr(self) -> str:
+        """:meta private:"""
+        s = super().extra_repr()
+
+        return f"{s}, grid_dims={self.grid_dims}"
+
+
+@final
+class Rotary3DEncoder(RotaryNdPositionEncoder):
+    uniform_power: bool
+
+    def __init__(
+        self,
+        encoding_dim: int,
+        grid_dims: tuple[int, int, int],
+        *,
+        uniform_power: bool = True,
+        theta: float = 10_000.0,
+        device: Device | None = None,
+    ) -> None:
+        super().__init__(encoding_dim, grid_dims, theta=theta, device=device)
+
+        self.uniform_power = uniform_power
+
+        self.reset_parameters()
+
+    @override
+    def reset_non_persistent_buffers(self) -> None:
+        freqs_cos = self.freqs_cos
+        freqs_sin = self.freqs_sin
+
+        device, dtype = freqs_cos.device, freqs_cos.dtype
+
+        z, x, y = self.grid_dims
+
+        z_steps = torch.arange(z, device=device, dtype=dtype)
+        x_steps = torch.arange(x, device=device, dtype=dtype)
+        y_steps = torch.arange(y, device=device, dtype=dtype)
+
+        z_coords, x_coords, y_coords = torch.meshgrid(
+            z_steps, x_steps, y_steps, indexing="ij"
+        )
+
+        if self.uniform_power:
+            uniform_dim = int(2 * ((self.encoding_dim // 3) // 2))
+
+            z_dim = uniform_dim
+            x_dim = uniform_dim
+            y_dim = uniform_dim
+        else:
+            z_dim = math.ceil(self.encoding_dim / 4) * 2
+            x_dim = math.ceil(self.encoding_dim / 8) * 2
+            y_dim = math.ceil(self.encoding_dim / 8) * 2
+
+        idx = 0
+
+        _fill_rotary_frequency_table(
+            freqs_cos[:, idx : idx + z_dim],
+            freqs_sin[:, idx : idx + z_dim],
+            z_dim,
+            z_coords.flatten(),
+            self.theta,
+        )
+
+        idx = z_dim
+
+        _fill_rotary_frequency_table(
+            freqs_cos[:, idx : idx + x_dim],
+            freqs_sin[:, idx : idx + x_dim],
+            x_dim,
+            x_coords.flatten(),
+            self.theta,
+        )
+
+        idx = z_dim + x_dim
+
+        _fill_rotary_frequency_table(
+            freqs_cos[:, idx : idx + y_dim],
+            freqs_sin[:, idx : idx + y_dim],
+            y_dim,
+            y_coords.flatten(),
+            self.theta,
+        )
+
+    @override
+    def _do_forward(
+        self,
+        seqs: Tensor,
+        padding_mask: PaddingMask | None,
+        state_bag: IncrementalStateBag | None,
+    ) -> Tensor:
+        """:meta private:"""
+        seq_len = seqs.size(-2)
+
+        if self.training or state_bag is None:
+            start_step = 0
+        else:
+            start_step = state_bag.step_nr
+
+        seqs_swapped = self._swap_pairs(seqs)
+
+        cos = self.freqs_cos[start_step : start_step + seq_len] * seqs
+        sin = self.freqs_sin[start_step : start_step + seq_len] * seqs_swapped
+
+        return cos + sin
+
+    @staticmethod
+    def _swap_pairs(seqs: Tensor) -> Tensor:
+        x1 = seqs[..., 0::2]
+        x2 = seqs[..., 1::2]
+
+        return torch.stack((-x2, x1), dim=-1).reshape(seqs.shape)
+
+
+def _fill_rotary_frequency_table(
+    cos_: Tensor, sin_: Tensor, encoding_dim: int, steps: Tensor, theta: float
+) -> None:
+    indices = torch.arange(encoding_dim // 2, device=steps.device, dtype=torch.float32)
+
+    # (E) -> (1, E)
+    indices = indices.unsqueeze(0)
+
+    # (S, 1)
+    steps = steps.unsqueeze(1)
+
+    # (S, 1) x (1, E) -> (S, E)
+    freqs = torch.matmul(steps, theta ** (-2.0 * indices / encoding_dim))
+
+    cos = torch.cos(freqs)
+    sin = torch.sin(freqs)
+
+    #    cos = cos.repeat_interleave(2, -1)
+    #    sin = sin.repeat_interleave(2, -1)
+    cos = cos.repeat(1, 2)
+    sin = sin.repeat(1, 2)
+
+    cos_[:] = cos
+    sin_[:] = sin
