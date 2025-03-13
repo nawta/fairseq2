@@ -19,9 +19,8 @@ from fairseq2.device import Device
 from fairseq2.error import InternalError
 from fairseq2.models.sequence import SequenceBatch
 from fairseq2.models.transformer import TransformerEncoder
-from fairseq2.nn import Linear
+from fairseq2.nn import BatchLayout, Linear
 from fairseq2.nn.ops import repeat_interleave
-from fairseq2.nn.padding import PaddingMask
 
 # isort: split
 
@@ -131,17 +130,13 @@ class Wav2Vec2Model(Module):
         :param batch:
             The batch of sequences to process.
         """
-        features = self.run_frontend(batch.seqs, batch.padding_mask)
+        features = self.run_frontend(batch.seqs, batch.seqs_layout)
 
-        features.seqs, features.padding_mask = self.encoder(
-            features.seqs, features.padding_mask
-        )
+        features.seqs = self.encoder(features.seqs, features.seqs_layout)
 
         return features
 
-    def run_frontend(
-        self, seqs: Tensor, padding_mask: PaddingMask | None
-    ) -> Wav2Vec2Features:
+    def run_frontend(self, seqs: Tensor, seqs_layout: BatchLayout) -> Wav2Vec2Features:
         """Run the encoder frontend in pretraining mode.
 
         :param seqs:
@@ -154,7 +149,7 @@ class Wav2Vec2Model(Module):
         """
         frontend = self.encoder_frontend
 
-        seqs, padding_mask, raw_features = frontend.extract_features(seqs, padding_mask)
+        seqs, seqs_layout, raw_features = frontend.extract_features(seqs, seqs_layout)
 
         # We use the extracted features as context network targets after masking
         # and quantization.
@@ -166,18 +161,14 @@ class Wav2Vec2Model(Module):
         if frontend.first_pass_dropout is not None:
             targets = frontend.first_pass_dropout(targets)
 
-        seqs, padding_mask, temporal_mask = frontend.process_features(
-            seqs, padding_mask, self.masker
-        )
+        seqs, temporal_mask = frontend.process_features(seqs, seqs_layout, self.masker)
 
         if temporal_mask is None:
             raise InternalError("`temporal_mask` is `None`.")
 
         targets = extract_masked_elements(targets, temporal_mask)
 
-        return Wav2Vec2Features(
-            seqs, padding_mask, targets, temporal_mask, raw_features
-        )
+        return Wav2Vec2Features(seqs, seqs_layout, targets, temporal_mask, raw_features)
 
     def quantize_and_contrast(self, features: Wav2Vec2Features) -> Wav2Vec2Output:
         """Quantize targets and produce logits for contrastive prediction.
@@ -185,9 +176,9 @@ class Wav2Vec2Model(Module):
         :param features:
             The extracted features from the encoder.
         """
-        encoder_output, encoder_padding_mask, targets, temporal_mask = (
+        encoder_output, encoder_output_layout, targets, temporal_mask = (
             features.seqs,
-            features.padding_mask,
+            features.seqs_layout,
             features.targets,
             features.temporal_mask,
         )
@@ -210,7 +201,7 @@ class Wav2Vec2Model(Module):
             temporal_mask,
             quantizer_output,
             encoder_output,
-            encoder_padding_mask,
+            encoder_output_layout,
             features.raw,
         )
 
@@ -302,10 +293,7 @@ class Wav2Vec2Features:
     batch size, :math:`S_{out}` is the output sequence length, and :math:`M` is
     the dimensionality of the model."""
 
-    padding_mask: PaddingMask | None
-    """The padding mask of :attr:`seqs`. *Shape:* :math:`(N,S_{out})`, where
-    :math:`N` is the batch size and :math:`S_{out}` is the output sequence
-    length."""
+    seqs_layout: BatchLayout
 
     targets: Tensor
     """The non-quantized context network targets that have been extracted from
@@ -322,6 +310,7 @@ class Wav2Vec2Features:
     """The raw features returned by the frontend. *Shape*: Same as :attr:`seqs`."""
 
 
+@final
 @dataclass
 class Wav2Vec2Output:
     """Holds the output of a wav2vec 2.0 model."""
@@ -351,10 +340,7 @@ class Wav2Vec2Output:
     :math:`N` is the batch size, :math:`S_{enc}` is the encoder output sequence
     length, and :math:`M` is the dimensionality of the model."""
 
-    encoder_padding_mask: PaddingMask | None
-    """The padding mask of :attr:`encoder_output`. *Shape:* :math:`(N,S_{enc})`,
-    where :math:`N` is the batch size and :math:`S_{enc}` is the encoder output
-    sequence length."""
+    encoder_output_layout: BatchLayout
 
     raw_features: Tensor
     """The raw features returned by the frontend. *Shape*: Same as

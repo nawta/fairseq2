@@ -36,14 +36,11 @@ from fairseq2.datasets import (
     StaticBatching,
     UnknownSplitError,
 )
+from fairseq2.datasets.utils._manifest import _load_files_and_weights
+from fairseq2.datasets.utils.batch import get_seqs_with_layout
 from fairseq2.error import NotSupportedError
 from fairseq2.gang import Gang
 from fairseq2.models.sequence import SequenceBatch
-from fairseq2.nn.padding import get_seqs_and_padding_mask
-
-# isort: split
-
-from fairseq2.datasets.utils._manifest import _load_files_and_weights
 
 
 @dataclass(kw_only=True)
@@ -316,11 +313,15 @@ class GenericInstructionDataset(InstructionDataset):
         def to_batch(example: dict[str, Any]) -> SequenceBatch:
             indices = cast(SequenceData, example["indices"])
 
-            seqs, padding_mask = get_seqs_and_padding_mask(indices)
+            seqs, seqs_layout = get_seqs_with_layout(indices)
 
             target_mask = example["target_mask"]["seqs"]
 
-            return SequenceBatch(seqs, padding_mask, target_mask, example=example)
+            num_target_mask_elements = int(target_mask.sum())
+
+            return SequenceBatch(
+                seqs, seqs_layout, target_mask, num_target_mask_elements, example
+            )
 
         pipeline = builder.map(to_batch).and_return()
 
@@ -403,9 +404,9 @@ class GenericInstructionDataset(InstructionDataset):
         def to_batch(example: dict[str, Any]) -> SequenceBatch:
             indices = cast(SequenceData, example["indices"])
 
-            seqs, padding_mask = get_seqs_and_padding_mask(indices, gang.device)
+            seqs, seqs_layout = get_seqs_with_layout(indices, gang.device)
 
-            return SequenceBatch(seqs, padding_mask, example=example)
+            return SequenceBatch(seqs, seqs_layout, example=example)
 
         pipeline = builder.map(to_batch).and_return()
 

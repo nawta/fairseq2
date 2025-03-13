@@ -317,6 +317,13 @@ if TYPE_CHECKING or DOC_MODE:
                 Can yield gains in execution speed when used with ``num_parallel_calls > 1``.
             """
 
+        def pack(
+            self,
+            num_examples: int,
+            drop_remainder: bool = True,
+            pinned_memory: bool = False,
+        ) -> Self: ...
+
         def prefetch(self, num_examples: int) -> Self:
             """Prefetch examples in the background while the current example is
             being processed.

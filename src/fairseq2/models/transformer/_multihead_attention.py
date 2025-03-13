@@ -22,6 +22,7 @@ from fairseq2.data_type import DataType
 from fairseq2.device import Device
 from fairseq2.error import NotSupportedError
 from fairseq2.nn import (
+    BatchLayout,
     IncrementalState,
     IncrementalStateBag,
     Linear,
@@ -29,15 +30,11 @@ from fairseq2.nn import (
     Projection,
 )
 from fairseq2.nn.ops import repeat_interleave
-from fairseq2.nn.padding import PaddingMask
 
 # isort: split
 
-from fairseq2.models.transformer._attention import SDPA, create_default_sdpa
-from fairseq2.models.transformer._attention_mask import (
-    AttentionMask,
-    AttentionMaskFactory,
-)
+from fairseq2.models.transformer._attention_bias import AttentionBiasCache
+from fairseq2.models.transformer._sdpa._base import SDPA
 
 
 class MultiheadAttention(Module, ABC):
@@ -66,12 +63,12 @@ class MultiheadAttention(Module, ABC):
     def forward(
         self,
         seqs: Tensor,
-        padding_mask: PaddingMask | None,
+        seqs_layout: BatchLayout,
         keys: Tensor,
-        key_padding_mask: PaddingMask | None,
+        keys_layout: BatchLayout,
         values: Tensor,
+        bias_cache: AttentionBiasCache,
         *,
-        attn_mask: AttentionMask | None = None,
         state_bag: IncrementalStateBag | None = None,
     ) -> Tensor:
         """
@@ -79,27 +76,14 @@ class MultiheadAttention(Module, ABC):
             The sequences to query. *Shape:* :math:`(N,S,M)`, where :math:`N` is
             the batch size, :math:`S` is the sequence length, and :math:`M` is
             the dimensionality of the model.
-        :param padding_mask:
-            The padding mask of ``seqs``. *Shape:* :math:`(N,S)`, where :math:`N`
-            is the batch size and :math:`S` is the sequence length.
         :param keys:
             The keys. *Shape:* :math:`(N,S_{kv},K)`, where :math:`N` is the
             batch size, :math:`S_{kv}` is the key/value sequence length, and
             :math:`K` is the key size.
-        :param key_padding_mask:
-            The padding mask indicating which key positions to ignore for the
-            purpose of attention. *Shape:* :math:`(N,S_{kv})`, where :math:`N`
-            is the batch size and :math:`S_{kv}` is the key/value sequence
-            length.
         :param values:
             The values. *Shape:* :math:`(N,S_{kv},V)`, where :math:`N` is the
             batch size, :math:`S_{kv}` is the key/value sequence length, and
             :math:`V` is the value size.
-        :param attn_mask:
-            The mask that will be added to attention weights before computing
-            the attention. *Shape:* :math:`([H],S,S_{kv})`, where :math:`H` is
-            the number of attention heads, :math:`S` is the sequence length, and
-            :math:`S_{kv}` is the key/value sequence length.
         :param state_bag:
             The state bag to use for incremental decoding.
 
@@ -138,12 +122,12 @@ class AttentionWeightHook(Protocol):
     :meth:`~MultiheadAttention.register_attn_weight_hook`."""
 
     def __call__(
-        self, m: MultiheadAttention, attn: Tensor, attn_weights: Tensor
+        self, m: MultiheadAttention, attns: Tensor, attn_weights: Tensor
     ) -> None:
         """
         :param m:
             The module that has computed the attention weights.
-        :param attn:
+        :param attns:
             The computed attention values. *Shape:* :math:`(N,S,V)`, where
             :math:`N` is the batch size, :math:`S` is the sequence length, and
             :math:`V` is the value size.
@@ -172,9 +156,9 @@ class AttentionWeightStoreHook(AttentionWeightHook):
         self._storage = storage
 
     def __call__(
-        self, m: MultiheadAttention, attn: Tensor, attn_weights: Tensor
+        self, m: MultiheadAttention, attns: Tensor, attn_weights: Tensor
     ) -> None:
-        self._storage.append((attn, attn_weights))
+        self._storage.append((attns, attn_weights))
 
 
 @final
@@ -187,7 +171,6 @@ class StandardMultiheadAttention(MultiheadAttention):
     q_proj: Projection
     k_proj: Projection
     v_proj: Projection
-    attn_mask_factory: AttentionMaskFactory | None
     pos_encoder: PositionEncoder | None
     sdpa: SDPA
     output_proj: Projection
@@ -197,6 +180,7 @@ class StandardMultiheadAttention(MultiheadAttention):
         self,
         model_dim: int,
         num_heads: int,
+        sdpa: SDPA,
         *,
         kv_dim: int | None = None,
         num_key_value_heads: int | None = None,
@@ -204,9 +188,7 @@ class StandardMultiheadAttention(MultiheadAttention):
         k_proj: Projection | None = None,
         v_proj: Projection | None = None,
         qkv_proj_init_fn: Callable[[Linear], None] | None = None,
-        attn_mask_factory: AttentionMaskFactory | None = None,
         pos_encoder: PositionEncoder | None = None,
-        sdpa: SDPA | None = None,
         output_proj: Projection | None = None,
         output_proj_init_fn: Callable[[Linear], None] | None = None,
         bias: bool = True,
@@ -240,8 +222,6 @@ class StandardMultiheadAttention(MultiheadAttention):
             ``None``, a default projection will be used.
         :param qkv_proj_init_fn:
             The callable to initialize the q, k, v projections.
-        :param attn_mask_factory:
-            The attention mask factory.
         :param pos_encoder:
             The position encoder to apply to sequences and keys after projection.
         :param sdpa:
@@ -344,8 +324,6 @@ class StandardMultiheadAttention(MultiheadAttention):
         self.k_proj = k_proj
         self.v_proj = v_proj
 
-        self.attn_mask_factory = attn_mask_factory
-
         if pos_encoder is not None:
             if head_dim != pos_encoder.encoding_dim:
                 raise ValueError(
@@ -356,10 +334,7 @@ class StandardMultiheadAttention(MultiheadAttention):
         else:
             self.register_module("pos_encoder", None)
 
-        if sdpa is not None:
-            self.sdpa = sdpa
-        else:
-            self.sdpa = create_default_sdpa()
+        self.sdpa = sdpa
 
         v_dim = v_proj.output_dim * num_query_groups
 
@@ -399,31 +374,31 @@ class StandardMultiheadAttention(MultiheadAttention):
     def forward(
         self,
         seqs: Tensor,
-        padding_mask: PaddingMask | None,
+        seqs_layout: BatchLayout,
         keys: Tensor,
-        key_padding_mask: PaddingMask | None,
+        keys_layout: BatchLayout,
         values: Tensor,
+        bias_cache: AttentionBiasCache,
         *,
-        attn_mask: AttentionMask | None = None,
         state_bag: IncrementalStateBag | None = None,
     ) -> Tensor:
         # (N, S, M) -> (N, H, S, K_h)
-        q = self._project_q(seqs, padding_mask, state_bag)
+        q = self._project_q(seqs, seqs_layout, state_bag)
 
         if self.training or state_bag is None:
             # k: (N, S_kv, M) -> (N, H_kv, S_kv, K_h)
             # v: (N, S_kv, M) -> (N, H_kv, S_kv, V_h)
-            k, v = self._project_kv(keys, key_padding_mask, values)
+            k, v = self._project_kv(keys, keys_layout, values)
         else:
             if seqs is keys:  # Self attention
-                if key_padding_mask is not None:
+                if keys_layout.is_packed or keys_layout.is_padded:
                     raise ValueError(
-                        "`key_padding_mask` must not be specified during incremental decoding."
+                        "`keys` must not be a packed or padded batch during incremental decoding."
                     )
 
                 # k: (N, S_step, M) -> (N, H_kv, S_step, K_h)
                 # v: (N, S_step, M) -> (N, H_kv, S_step, V_h)
-                k, v = self._project_kv(keys, key_padding_mask, values, state_bag)
+                k, v = self._project_kv(keys, keys_layout, values, state_bag)
 
                 state = state_bag.get_state(self, AttentionState)
                 if state is None:
@@ -445,7 +420,7 @@ class StandardMultiheadAttention(MultiheadAttention):
                 if state is None:
                     # k: (N, S_kv, M) -> (N, H_kv, S_kv, K_h)
                     # v: (N, S_kv, M) -> (N, H_kv, S_kv, V_h)
-                    k, v = self._project_kv(keys, key_padding_mask, values)
+                    k, v = self._project_kv(keys, keys_layout, values)
 
                     state_factory = self.state_factory or StaticAttentionState
 
@@ -459,6 +434,8 @@ class StandardMultiheadAttention(MultiheadAttention):
                     # v: (N, H_kv, S_kv, V_h)
                     k, v = state.get()
 
+            keys_layout = BatchLayout.of(k)
+
         # With Grouped Query Attention, each key/value head is repeated.
         if (num_query_groups := self.num_heads // self.num_key_value_heads) > 1:
             # (N, H_kv, S_kv, K_h) -> (N, H, S_kv, K_h)
@@ -466,43 +443,31 @@ class StandardMultiheadAttention(MultiheadAttention):
             # (N, H_kv, S_kv, K_h) -> (N, H, S_kv, V_h)
             v = repeat_interleave(v, dim=1, repeat=num_query_groups)
 
-        if self.attn_mask_factory is not None:
-            attn_mask = self.attn_mask_factory(
-                seqs, keys=keys, training=self.training, state_bag=state_bag
-            )
-
         needs_weights = len(self._attn_weight_hooks) > 0
 
-        # attn:         (N, H, S, V_h)
+        # attns:        (N, H, S, V_h)
         # attn_weights: (N, H, S, S_kv)
-        attn, attn_weights = self.sdpa(
-            q,
-            k,
-            key_padding_mask,
-            v,
-            attn_mask=attn_mask,
-            needs_weights=needs_weights,
+        attns, attn_weights = self.sdpa(
+            q, seqs_layout, k, keys_layout, v, bias_cache, needs_weights=needs_weights
         )
 
         if attn_weights is not None:
             for hook in self._attn_weight_hooks.values():
-                hook(self, attn, attn_weights)
+                hook(self, attns, attn_weights)
 
         # (N, H, S, V_h) -> (N, S, H, V_h)
-        attn = attn.transpose(1, 2)
+        attns = attns.transpose(1, 2)
 
         # (N, S, H, V_h) -> (N, S, V_proj)
-        attn = attn.flatten(2, 3)
+        attns = attns.flatten(2, 3)
 
         # (N, S, V_proj) -> (N, S, M)
-        attn = self.output_proj(attn)
-
-        return attn  # type: ignore[no-any-return]
+        return self.output_proj(attns)  # type: ignore[no-any-return]
 
     def _project_q(
         self,
         seqs: Tensor,
-        padding_mask: PaddingMask | None,
+        seqs_layout: BatchLayout,
         state_bag: IncrementalStateBag | None = None,
     ) -> Tensor:
         # (N, S, M) -> (N, S, K_proj)
@@ -512,14 +477,14 @@ class StandardMultiheadAttention(MultiheadAttention):
         q = q.unflatten(-1, (self.num_heads, -1)).transpose(1, 2)
 
         if self.pos_encoder is not None:
-            q = self.pos_encoder(q, padding_mask, state_bag=state_bag)
+            q = self.pos_encoder(q, seqs_layout, state_bag=state_bag)
 
         return q  # type: ignore[no-any-return]
 
     def _project_kv(
         self,
         keys: Tensor,
-        key_padding_mask: PaddingMask | None,
+        keys_layout: BatchLayout,
         values: Tensor,
         state_bag: IncrementalStateBag | None = None,
     ) -> tuple[Tensor, Tensor]:
@@ -534,7 +499,7 @@ class StandardMultiheadAttention(MultiheadAttention):
         v = v.unflatten(-1, (self.num_key_value_heads, -1)).transpose(1, 2)
 
         if self.pos_encoder is not None:
-            k = self.pos_encoder(k, key_padding_mask, state_bag=state_bag)
+            k = self.pos_encoder(k, keys_layout, state_bag=state_bag)
 
         return k, v
 

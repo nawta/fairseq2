@@ -152,7 +152,7 @@ class Wav2Vec2MetricBag(RecipeMetricBag):
     def update_batch_metrics(self, batch: SequenceBatch) -> None:
         num_examples = batch.batch_size
 
-        num_elements = batch.num_elements()
+        num_elements = batch.num_elements
 
         self.num_examples.update(num_examples)
         self.num_elements.update(num_elements)

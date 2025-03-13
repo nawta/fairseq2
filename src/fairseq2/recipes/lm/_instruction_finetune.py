@@ -422,7 +422,7 @@ class InstructionFinetuneCriterion:
 
         metric_bag.update_batch_metrics(target_batch)
 
-        return loss, target_batch.num_target_elements()
+        return loss, target_batch.num_target_elements
 
     @property
     def model(self) -> Model:

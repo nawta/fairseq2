@@ -86,10 +86,10 @@ class POFinetuneMetricBag(SequenceMetricBag):
             The batch processed by the model.
         """
         self.chosen_lengths.update(
-            Tensor([batch.chosen.num_target_elements() / batch.chosen.batch_size]),
+            Tensor([batch.chosen.num_target_elements / batch.chosen.batch_size]),
             weight=batch.chosen.batch_size,
         )
         self.rejected_lengths.update(
-            Tensor([batch.rejected.num_target_elements() / batch.rejected.batch_size]),
+            Tensor([batch.rejected.num_target_elements / batch.rejected.batch_size]),
             weight=batch.rejected.batch_size,
         )

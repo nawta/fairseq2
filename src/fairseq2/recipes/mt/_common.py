@@ -53,7 +53,7 @@ class MTCriterion:
 
         metric_bag.update_batch_metrics(input_batch)
 
-        return loss, batch.num_target_elements()
+        return loss, batch.num_target_elements
 
     @property
     def model(self) -> Model:

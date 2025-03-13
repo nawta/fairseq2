@@ -71,19 +71,19 @@ class Wav2Vec2AsrModel(AsrModel):
         :param batch:
             The batch of sequences to process.
         """
-        seqs, padding_mask, _ = self.encoder_frontend.extract_features(
-            batch.seqs, batch.padding_mask
+        seqs, seqs_layout, _ = self.encoder_frontend.extract_features(
+            batch.seqs, batch.seqs_layout
         )
 
-        seqs, padding_mask, _ = self.encoder_frontend.process_features(
-            seqs, padding_mask, self.masker if self.training else None
+        seqs, _ = self.encoder_frontend.process_features(
+            seqs, seqs_layout, self.masker if self.training else None
         )
 
-        seqs, padding_mask = self.encoder(seqs, padding_mask)
+        seqs = self.encoder(seqs, seqs_layout)
 
         if self.final_dropout is not None:
             seqs = self.final_dropout(seqs)
 
         logits = self.final_proj(seqs)
 
-        return AsrModelOutput(logits, padding_mask)
+        return AsrModelOutput(logits, seqs_layout)

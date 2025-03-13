@@ -22,8 +22,7 @@ from fairseq2.models.wav2vec2 import (
     Wav2Vec2Output,
     extract_masked_elements,
 )
-from fairseq2.nn import Linear
-from fairseq2.nn.padding import PaddingMask
+from fairseq2.nn import BatchLayout, Linear
 
 
 @final
@@ -78,12 +77,12 @@ class W2VBertModel(Module):
         :param batch:
             The batch of sequences to process.
         """
-        w2v2_features = self.w2v2_model.run_frontend(batch.seqs, batch.padding_mask)
+        w2v2_features = self.w2v2_model.run_frontend(batch.seqs, batch.seqs_layout)
 
         def hook(
             layer_idx: int,
             layer_output: Tensor,
-            layer_padding_mask: PaddingMask | None,
+            layer_output_layout: BatchLayout,
             num_layers: int,
         ) -> bool:
             if layer_idx == num_layers - self.num_bert_encoder_layers - 1:
@@ -92,8 +91,8 @@ class W2VBertModel(Module):
             return True
 
         with self.w2v2_model.encoder.register_layer_hook(hook):
-            encoder_output, _ = self.w2v2_model.encoder(
-                w2v2_features.seqs, w2v2_features.padding_mask
+            encoder_output = self.w2v2_model.encoder(
+                w2v2_features.seqs, w2v2_features.seqs_layout
             )
 
         w2v2_output = self.w2v2_model.quantize_and_contrast(w2v2_features)
@@ -124,6 +123,7 @@ class W2VBertModel(Module):
         )
 
 
+@final
 @dataclass
 class W2VBertOutput:
     """Holds the output of a w2v-BERT model."""

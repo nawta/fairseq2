@@ -454,13 +454,13 @@ class MTBleuChrfEvalUnit(EvalUnit[Seq2SeqBatch]):
             )
 
         hyps, output = self._converter.batch_convert(
-            batch.source_seqs, batch.source_padding_mask
+            batch.source_seqs, batch.source_seqs_layout
         )
 
         self._metric_bag.bleu.update(refs, hyps)
         self._metric_bag.chrf.update(refs, hyps)
 
-        self._metric_bag.update_batch_metrics(output, batch.num_source_elements())
+        self._metric_bag.update_batch_metrics(output, batch.num_source_elements)
 
         try:
             # Dump source sentences.

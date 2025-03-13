@@ -170,6 +170,13 @@ public:
         bool deterministic = true) &&;
 
     data_pipeline_builder
+    pack(
+        std::int64_t num_elements,
+        bool truncate = false,
+        bool drop_remainder = true,
+        bool pinned_memory = false) &&;
+
+    data_pipeline_builder
     prefetch(std::size_t num_examples) &&;
 
     data_pipeline_builder

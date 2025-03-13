@@ -15,8 +15,8 @@ from torch.nn.functional import pad
 from fairseq2.data_type import DataType
 from fairseq2.device import Device
 from fairseq2.error import InternalError
-from fairseq2.nn import LayerNorm, StandardLayerNorm
-from fairseq2.nn.padding import PaddingMask, apply_padding_mask
+from fairseq2.nn import BatchLayout, LayerNorm, StandardLayerNorm
+from fairseq2.nn.utils.padding import apply_mask
 
 
 @final
@@ -117,21 +117,25 @@ class ConformerConvolution(Module):
             model_dim, model_dim, kernel_size=1, bias=False, device=device, dtype=dtype
         )
 
-    def forward(self, seqs: Tensor, padding_mask: PaddingMask | None) -> Tensor:
+    def forward(self, seqs: Tensor, seqs_layout: BatchLayout) -> Tensor:
         """
         :param seqs:
             The sequences to process. *Shape:* :math:`(N,S,M)`, where :math:`N`
             is the batch size, :math:`S` is the sequence length, and :math:`M`
             is the dimensionality of the model.
-        :param padding_mask:
-            The padding mask of ``seqs``. *Shape:* :math:`(N,S)`, where :math:`N`
-            is the batch size and :math:`S` is the sequence length.
 
         :returns:
             The processed sequences. *Shape:* Same as ``seqs``.
         """
-        # Ensure that we do not leak padded positions in depthwise convolution.
-        seqs = apply_padding_mask(seqs, padding_mask)
+        if seqs_layout.is_packed:
+            raise ValueError("`seqs` must not be a packed batch.")
+
+        if seqs_layout.is_padded:
+            padding_mask = seqs_layout.get_padding_mask()
+
+            # We have to ensure that the padded elements are correctly set to
+            # zero; otherwise, noise will leak into the feature maps.
+            seqs = apply_mask(seqs, padding_mask)
 
         # (N, S, M) -> (N, M, S)
         seqs = seqs.transpose(1, 2)

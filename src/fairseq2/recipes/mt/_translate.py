@@ -331,9 +331,9 @@ class TextTranslationUnit(GeneratorUnit[SequenceBatch]):
                 f"`batch.example['text'] must be an iterable of strings, but is of type `{type(srcs)}` instead."
             )
 
-        hyps, output = self._converter.batch_convert(batch.seqs, batch.padding_mask)
+        hyps, output = self._converter.batch_convert(batch.seqs, batch.seqs_layout)
 
-        self._metric_bag.update_batch_metrics(output, batch.num_elements())
+        self._metric_bag.update_batch_metrics(output, batch.num_elements)
 
         try:
             # Dump source sentences.

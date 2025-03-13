@@ -103,7 +103,7 @@ class SimPOFinetuneUnit(TrainUnit[PreferenceBatch]):
             + self._nll_scale
             * nll_loss
             * chosen_target_batch.batch_size
-            / chosen_target_batch.num_target_elements()
+            / chosen_target_batch.num_target_elements
         )  # nll normalization applied locally per-rank
 
         return loss, chosen_target_batch.batch_size

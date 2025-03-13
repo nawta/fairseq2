@@ -15,7 +15,8 @@ from torch.nn import Module
 from torch.nn.functional import ctc_loss, log_softmax
 
 from fairseq2.models.sequence import SequenceBatch
-from fairseq2.nn.padding import PaddingMask, get_seq_lens, pad_seqs
+from fairseq2.nn import BatchLayout
+from fairseq2.nn.utils.padding import pad_seqs
 
 
 class AsrModel(Module, ABC):
@@ -32,14 +33,9 @@ class AsrModelOutput:
     where :math:`N` is the batch size, :math:`S_{out}` is the output sequence
     length, and :math:`T` is the size of the vocabulary."""
 
-    padding_mask: PaddingMask | None
-    """The padding mask of :attr:`logits`. *Shape:* :math:`(N,S_{out})`, where
-    :math:`N` is the batch size and :math:`S_{out}` is the output sequence
-    length."""
+    logits_layout: BatchLayout
 
-    def compute_loss(
-        self, targets: Tensor, target_padding_mask: PaddingMask | None
-    ) -> Tensor:
+    def compute_loss(self, targets: Tensor, targets_layout: BatchLayout) -> Tensor:
         """Compute the CTC (Connectionist Temporal Classification) loss.
 
         :param targets:
@@ -58,25 +54,19 @@ class AsrModelOutput:
         # (N, S, T) -> (S, N, T)
         lprobs_t = lprobs.transpose(0, 1)
 
-        # (N)
-        seq_lens = get_seq_lens(lprobs, self.padding_mask)
-
-        # (N)
-        target_seq_lens = get_seq_lens(targets, target_padding_mask)
-
         # ()
         return ctc_loss(
             lprobs_t,
             targets,
-            seq_lens,
-            target_seq_lens,
+            input_lengths=self.logits_layout.seq_lens_pt,
+            target_lengths=targets_layout.seq_lens_pt,
             reduction="sum",
             zero_infinity=True,
         )
 
     def generate_hypotheses(
         self, pad_idx: int, blank_label: int = 0
-    ) -> tuple[Tensor, PaddingMask | None]:
+    ) -> tuple[Tensor, BatchLayout]:
         """Generate hypotheses using greedy search.
 
         :param pad_idx:
@@ -91,14 +81,12 @@ class AsrModelOutput:
             - The padding mask of the generated sequences. *Shape:* Same as the
               generated sequences.
         """
-        seq_lens = get_seq_lens(self.logits, self.padding_mask)
-
         hyp_seq_list = []
 
         # Get the greedy token (i.e. unit) output of the model.
-        for logits, seq_len in zip(self.logits, seq_lens):
+        for logits, logits_len in zip(self.logits, self.logits_layout.seq_lens):
             # (S)
-            hyp_seq = logits[:seq_len].argmax(-1).unique_consecutive()
+            hyp_seq = logits[:logits_len].argmax(-1).unique_consecutive()
 
             # (S - blank)
             hyp_seq = hyp_seq[hyp_seq != blank_label]

@@ -33,15 +33,12 @@ from fairseq2.datasets import (
     LengthBatching,
     StaticBatching,
 )
+from fairseq2.datasets.utils._manifest import _load_files_and_weights
+from fairseq2.datasets.utils.batch import get_seqs_with_layout
 from fairseq2.device import Device, SupportsDeviceTransfer
 from fairseq2.error import NotSupportedError
 from fairseq2.gang import Gang
 from fairseq2.models.sequence import SequenceBatch
-from fairseq2.nn.padding import get_seqs_and_padding_mask
-
-# isort: split
-
-from fairseq2.datasets.utils._manifest import _load_files_and_weights
 
 
 @dataclass(kw_only=True)
@@ -329,25 +326,28 @@ class GenericPreferenceDataset(PreferenceDataset):
             indices_chosen = cast(SequenceData, example["indices_chosen"])
             indices_rejected = cast(SequenceData, example["indices_rejected"])
 
-            seqs_chosen, padding_mask_chosen = get_seqs_and_padding_mask(indices_chosen)
-            seqs_rejected, padding_mask_rejected = get_seqs_and_padding_mask(
-                indices_rejected
-            )
+            seqs_chosen, seqs_chosen_layout = get_seqs_with_layout(indices_chosen)
+            seqs_rejected, seqs_rejected_layout = get_seqs_with_layout(indices_rejected)
 
             target_mask_chosen = example["target_mask_chosen"]["seqs"]
             target_mask_rejected = example["target_mask_rejected"]["seqs"]
 
+            num_target_mask_chosen_elements = int(target_mask_chosen.sum())
+            num_target_mask_rejected_elements = int(target_mask_rejected.sum())
+
             batch_chosen = SequenceBatch(
                 seqs_chosen,
-                padding_mask_chosen,
+                seqs_chosen_layout,
                 target_mask_chosen,
+                num_target_mask_chosen_elements,
                 example=example,
             )
 
             batch_rejected = SequenceBatch(
                 seqs_rejected,
-                padding_mask_rejected,
+                seqs_rejected_layout,
                 target_mask_rejected,
+                num_target_mask_rejected_elements,
                 example=example,
             )
 

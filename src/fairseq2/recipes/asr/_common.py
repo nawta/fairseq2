@@ -41,11 +41,11 @@ class AsrCriterion:
     def __call__(
         self, batch: Seq2SeqBatch, metric_bag: AsrMetricBag
     ) -> tuple[Tensor, int]:
-        input_batch = SequenceBatch(batch.source_seqs, batch.source_padding_mask)
+        input_batch = SequenceBatch(batch.source_seqs, batch.source_seqs_layout)
 
         model_output: AsrModelOutput = self._model.module(input_batch)
 
-        loss = model_output.compute_loss(batch.target_seqs, batch.target_padding_mask)
+        loss = model_output.compute_loss(batch.target_seqs, batch.target_seqs_layout)
 
         metric_bag.update_ctc_loss(batch, loss)
 
@@ -102,10 +102,10 @@ class AsrScorer:
         self, batch: Seq2SeqBatch, output: AsrModelOutput, metric_bag: AsrMetricBag
     ) -> None:
         # (N, S), (N, S)
-        ref_seqs, ref_padding_mask = batch.target_seqs, batch.target_padding_mask
+        ref_seqs, ref_seqs_layout = batch.target_seqs, batch.target_seqs_layout
 
         # (N, S), (N, S)
-        hyp_seqs, hyp_padding_mask = output.generate_hypotheses(
+        hyp_seqs, hyp_seqs_layout = output.generate_hypotheses(
             self._pad_idx, self._blank_label
         )
 
@@ -113,7 +113,7 @@ class AsrScorer:
         hyps = [self._text_decoder(s) for s in hyp_seqs]
 
         metric_bag.wer.update(
-            refs, ref_seqs, ref_padding_mask, hyps, hyp_seqs, hyp_padding_mask
+            refs, ref_seqs, ref_seqs_layout, hyps, hyp_seqs, hyp_seqs_layout
         )
 
         try:
@@ -161,7 +161,7 @@ class AsrMetricBag(RecipeMetricBag):
     def update_batch_metrics(self, batch: Seq2SeqBatch) -> None:
         num_examples = batch.batch_size
 
-        num_elements = batch.num_source_elements()
+        num_elements = batch.num_source_elements
 
         self.num_examples.update(num_examples)
         self.num_elements.update(num_elements)

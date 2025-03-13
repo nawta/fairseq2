@@ -318,7 +318,7 @@ class TextGenerateUnit(GeneratorUnit[SequenceBatch]):
 
         ids = batch.example["id"]
 
-        output = self._generator(batch.seqs, batch.padding_mask)
+        output = self._generator(batch.seqs, batch.seqs_layout)
 
         self._metric_bag.update_batch_metrics(output)
 

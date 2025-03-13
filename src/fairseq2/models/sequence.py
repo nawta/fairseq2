@@ -15,8 +15,8 @@ from torch.nn import Module
 from typing_extensions import override
 
 from fairseq2.device import Device, SupportsDeviceTransfer
+from fairseq2.nn import BatchLayout
 from fairseq2.nn.ops import CrossEntropy, cross_entropy
-from fairseq2.nn.padding import PaddingMask
 
 
 class SequenceModel(Module, ABC):
@@ -48,43 +48,46 @@ class SequenceBatch(SupportsDeviceTransfer):
     size, :math:`S` is the sequence length, and :math:`*` is any number of
     sequence-specific dimensions including none."""
 
-    padding_mask: PaddingMask | None
-    """The padding mask of :attr:`seqs`. *Shape:* :math:`(N,S)`, where :math:`N`
-    is the batch size and :math:`S` is the sequence length."""
+    seqs_layout: BatchLayout
 
     target_mask: Tensor | None = None
-    """The mask specifying the elements in ``seqs`` that should be treated as
+    """
+    The mask specifying the elements in ``seqs`` that should be treated as
     targets during model training or validation. *Shape:* :math:`(N,S)`, where
-    :math:`N` is the batch size and :math:`S` is the sequence length."""
+    :math:`N` is the batch size and :math:`S` is the sequence length.
+    """
+
+    num_target_mask_elements: int | None = None
 
     example: object = None
     """The data example from which this batch was constructed."""
+
+    def __post_init__(self) -> None:
+        if self.target_mask is not None:
+            self.num_target_mask_elements = int(self.target_mask.sum())
 
     @property
     def batch_size(self) -> int:
         """The size of the batch dimension."""
         return self.seqs.size(0)
 
+    @property
     def num_elements(self) -> int:
-        """Return the number of elements in the batch."""
-        if self.padding_mask is None:
-            return self.seqs.numel()
+        """The number of elements in the batch."""
+        return self.seqs_layout.num_elements
 
-        return int(self.padding_mask.seq_lens.sum())
-
+    @property
     def num_target_elements(self) -> int:
-        """Return the number of target elements in the batch."""
-        if self.target_mask is not None:
-            return int(self.target_mask.sum())
+        """The number of target elements in the batch."""
+        if self.num_target_mask_elements is not None:
+            return self.num_target_mask_elements
 
-        return self.num_elements()
+        return self.seqs_layout.num_elements
 
     @override
     def to(self, device: Device) -> None:
         self.seqs = self.seqs.to(device)
-
-        if self.padding_mask is not None:
-            self.padding_mask = self.padding_mask.to(device)
+        self.seqs_layout = self.seqs_layout.to(device)
 
         if self.target_mask is not None:
             self.target_mask = self.target_mask.to(device)
@@ -98,30 +101,35 @@ def as_auto_regressive_input(
     :returns:
         The tuple of input and target batches.
     """
-    if (seq_len := batch.seqs.size(1)) < 2:
-        raise ValueError(
-            f"The sequence length of `batch.seqs` must be at least 2 for training, but is {seq_len} instead."
-        )
+    for idx, seq_len in enumerate(batch.seqs_layout.seq_lens):
+        if seq_len < 2:
+            raise ValueError(
+                f"The length of `batch.seqs[{idx}]` must be greater than or equal to 2 for training, but is {seq_len} instead."
+            )
 
-    seqs, targets = batch.seqs[:, :-1], batch.seqs[:, 1:]
+    seqs = batch.seqs[:, :-1]
 
-    if batch.padding_mask is None:
-        padding_mask = None
-    else:
-        padding_mask = batch.padding_mask.trim(1)
+    seqs_layout = batch.seqs_layout.trim()
 
     if batch.target_mask is None:
-        seqs_target_mask, target_mask = None, None
+        seqs_target_mask = None
     else:
-        seqs_target_mask, target_mask = (
-            batch.target_mask[:, :-1], batch.target_mask[:, 1:]  # fmt: skip
-        )
+        seqs_target_mask = batch.target_mask[:, :-1]
 
-    batch = SequenceBatch(seqs, padding_mask, seqs_target_mask, batch.example)
+    input_batch = SequenceBatch(
+        seqs, seqs_layout, seqs_target_mask, example=batch.example
+    )
 
-    target_batch = SequenceBatch(targets, padding_mask, target_mask)
+    targets = batch.seqs[:, 1:]
 
-    return batch, target_batch
+    if batch.target_mask is None:
+        target_mask = None
+    else:
+        target_mask = batch.target_mask[:, 1:]
+
+    target_batch = SequenceBatch(targets, seqs_layout, target_mask)
+
+    return input_batch, target_batch
 
 
 @final

@@ -22,10 +22,10 @@ from typing_extensions import override
 from fairseq2.data_type import DataType
 from fairseq2.device import Device
 from fairseq2.error import InternalError
-from fairseq2.nn.padding import PaddingMask
 
 # isort: split
 
+from fairseq2.nn._batch_layout import BatchLayout
 from fairseq2.nn._incremental_state import IncrementalStateBag
 
 
@@ -53,7 +53,7 @@ class PositionEncoder(Module, ABC):
     def forward(
         self,
         seqs: Tensor,
-        padding_mask: PaddingMask | None,
+        seqs_layout: BatchLayout,
         *,
         state_bag: IncrementalStateBag | None = None,
     ) -> Tensor:
@@ -64,9 +64,6 @@ class PositionEncoder(Module, ABC):
             where :math:`*` is any number of batch dimensions including none,
             :math:`S` is the sequence length, and :math:`E` is the dimensionality
             of the positional encodings.
-        :param padding_mask: The padding mask of ``seqs``. *Shape:* :math:`(*,S)`,
-            where :math:`*` is any number of batch dimensions including none and
-            :math:`S` is the sequence length.
         :param state_bag: If not ``None``, the encoder will operate in
             incremental decoding mode. This means that the first step in ``seqs``
             will be considered to be at position :attr:`state_bag.step_nr
@@ -84,18 +81,20 @@ class PositionEncoder(Module, ABC):
             else:
                 start_step = state_bag.step_nr
 
-            if (seq_len := start_step + seqs.size(-2)) > self.max_seq_len:
+            max_seq_len = start_step + seqs_layout.shape[1]
+
+            if max_seq_len > self.max_seq_len:
                 raise ValueError(
-                    f"The input sequence length must be less than or equal to the maximum sequence length ({self.max_seq_len}), but is {seq_len} instead."
+                    f"The input sequence length must be less than or equal to the maximum sequence length ({self.max_seq_len}), but is {max_seq_len} instead."
                 )
 
-        return self._do_forward(seqs, padding_mask, state_bag)
+        return self._do_forward(seqs, seqs_layout, state_bag)
 
     @abstractmethod
     def _do_forward(
         self,
         seqs: Tensor,
-        padding_mask: PaddingMask | None,
+        seqs_layout: BatchLayout,
         state_bag: IncrementalStateBag | None,
     ) -> Tensor:
         """
@@ -184,18 +183,28 @@ class SinusoidalPositionEncoder(PositionEncoder):
     def _do_forward(
         self,
         seqs: Tensor,
-        padding_mask: PaddingMask | None,
+        seqs_layout: BatchLayout,
         state_bag: IncrementalStateBag | None,
     ) -> Tensor:
         """:meta private:"""
-        seq_len = seqs.size(-2)
+        if seqs_layout.is_packed:
+            indices = seqs_layout.get_position_indices()
 
-        if self.training or state_bag is None:
-            start_step = 0
+            if not self.training and state_bag is not None:
+                indices = state_bag.step_nr + indices
+
+            freqs = self.freqs[indices]
         else:
-            start_step = state_bag.step_nr
+            batch_width = seqs.size(-2)
 
-        fp32_seqs = seqs.float() + self.freqs[start_step : start_step + seq_len]
+            if not self.training and state_bag is not None:
+                start_step = state_bag.step_nr
+            else:
+                start_step = 0
+
+            freqs = self.freqs[start_step : start_step + batch_width]
+
+        fp32_seqs = seqs.float() + freqs
 
         return fp32_seqs.type_as(seqs)
 
@@ -266,7 +275,7 @@ class LearnedPositionEncoder(PositionEncoder):
     def _do_forward(
         self,
         seqs: Tensor,
-        padding_mask: PaddingMask | None,
+        seqs_layout: BatchLayout,
         state_bag: IncrementalStateBag | None,
     ) -> Tensor:
         """:meta private:"""
@@ -280,6 +289,7 @@ class LearnedPositionEncoder(PositionEncoder):
         steps = torch.arange(
             start_step, start_step + seq_len, device=seqs.device, dtype=torch.int64
         )
+
 
         return seqs + embedding(steps, self.weight)
 
@@ -374,20 +384,25 @@ class RotaryEncoder(PositionEncoder):
     def _do_forward(
         self,
         seqs: Tensor,
-        padding_mask: PaddingMask | None,
+        seqs_layout: BatchLayout,
         state_bag: IncrementalStateBag | None,
     ) -> Tensor:
         """:meta private:"""
-        seq_len = seqs.size(-2)
+#        seq_len = seqs.size(-2)
 
-        if self.training or state_bag is None:
-            start_step = 0
-        else:
-            start_step = state_bag.step_nr
+        indices = seqs_layout.get_position_indices()
 
-        complex_freqs = torch.view_as_complex(self.freqs)
+        indices = indices.unsqueeze(1)
 
-        complex_freqs = complex_freqs[start_step : start_step + seq_len]
+        if not self.training and state_bag is not None:
+            indices = state_bag.step_nr + indices
+#        from fairseq2.logging import log
+#        log.info(f"{seqs.shape}")
+#        log.info(f"{indices.shape}")
+        freqs = self.freqs[indices]
+#        log.info(f"{freqs.shape}")
+        complex_freqs = torch.view_as_complex(freqs)
+
 
         # (*, S, E) -> (*, S, E / 2, 2)
         seqs = seqs.unflatten(-1, (-1, 2))

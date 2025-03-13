@@ -64,7 +64,7 @@ class SequenceMetricBag(RecipeMetricBag):
         loss = loss.detach()
 
         if normalize:
-            n = batch.num_target_elements()
+            n = batch.num_target_elements
         else:
             n = 1
 
@@ -74,9 +74,9 @@ class SequenceMetricBag(RecipeMetricBag):
     def update_batch_metrics(self, batch: SequenceBatch) -> None:
         num_examples = batch.batch_size
 
-        num_elements = batch.num_elements()
+        num_elements = batch.num_elements
 
-        num_target_elements = batch.num_target_elements()
+        num_target_elements = batch.num_target_elements
 
         self.num_examples.update(num_examples)
         self.num_elements.update(num_elements)
@@ -118,7 +118,7 @@ class Seq2SeqMetricBag(RecipeMetricBag):
         loss = loss.detach()
 
         if normalize:
-            n = batch.num_target_elements()
+            n = batch.num_target_elements
         else:
             n = 1
 
@@ -128,8 +128,8 @@ class Seq2SeqMetricBag(RecipeMetricBag):
     def update_batch_metrics(self, batch: Seq2SeqBatch) -> None:
         num_examples = batch.batch_size
 
-        num_source_elements = batch.num_source_elements()
-        num_target_elements = batch.num_target_elements()
+        num_source_elements = batch.num_source_elements
+        num_target_elements = batch.num_target_elements
 
         num_elements = num_source_elements + num_target_elements
 

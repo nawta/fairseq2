@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from fairseq2.nn._batch_layout import BatchLayout as BatchLayout
 from fairseq2.nn._embedding import Embedding as Embedding
 from fairseq2.nn._embedding import ShardedEmbedding as ShardedEmbedding
 from fairseq2.nn._embedding import StandardEmbedding as StandardEmbedding
