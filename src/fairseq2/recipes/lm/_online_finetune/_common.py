@@ -19,7 +19,7 @@ from fairseq2.datasets.preference import PreferenceBatch
 from fairseq2.datasets.prompt import PromptBatch
 from fairseq2.gang import Gang
 from fairseq2.models.sequence import SequenceBatch, SequenceModelOutput
-from fairseq2.recipes.metrics import SequenceMetricBag
+from fairseq2.recipes import SequenceMetricBag
 
 import ray
 from ray.util.placement_group import placement_group

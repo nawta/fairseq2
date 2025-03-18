@@ -16,7 +16,7 @@ from torch import Tensor
 from torch.nn import Module
 from torcheval.metrics import Mean
 from typing_extensions import override
-from fairseq2.recipes.model import Model
+from fairseq2.recipes import Model
 
 from fairseq2.context import RuntimeContext
 from fairseq2.datasets.preference import PreferenceBatch
@@ -41,7 +41,7 @@ from fairseq2.recipes.config import (
 )
 from fairseq2.recipes.lm._online_finetune._common import OnlineCriterionSection
 from fairseq2.recipes.lm._online_finetune._handler import OnlineFinetuneUnitHandler
-from fairseq2.recipes.trainer import TrainUnit
+from fairseq2.recipes import TrainUnit
 from fairseq2.typing import DataType
 from fairseq2.utils.structured import structure
 from fairseq2.utils.validation import validate
@@ -54,7 +54,7 @@ from fairseq2.recipes.lm._online_finetune._rewards import VLLMOutputRewardHandle
 from fairseq2.recipes.lm._online_finetune._remote_vllm import VllmConfig, RemoteVllmModelHandler, RemoteVllmModel
 
 from fairseq2.recipes.lm._online_finetune._common import copy_state, generate_rollouts, GRPOBatch
-from fairseq2.recipes.metrics import SequenceMetricBag
+from fairseq2.recipes import SequenceMetricBag
 
 @final
 class GrpoFinetuneUnit(TrainUnit[SequenceBatch]):

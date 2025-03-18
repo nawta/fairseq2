@@ -60,7 +60,7 @@ from fairseq2.recipes.lm._online_finetune._handler import (
     OnlineFinetuneUnitHandler,
     UnknownOnlineFinetuneUnitError,
 )
-from fairseq2.recipes.trainer import Trainer
+from fairseq2.recipes import Trainer
 from fairseq2.typing import CPU
 from fairseq2.utils.rng import manual_seed
 from fairseq2.utils.structured import structure

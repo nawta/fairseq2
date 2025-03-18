@@ -12,7 +12,7 @@ from torch.nn import Module
 
 from fairseq2.models.sequence import SequenceBatch
 from fairseq2.gang import Gangs
-from fairseq2.recipes.trainer import TrainUnit
+from fairseq2.recipes import TrainUnit
 
 
 class OnlineFinetuneUnitHandler(ABC):

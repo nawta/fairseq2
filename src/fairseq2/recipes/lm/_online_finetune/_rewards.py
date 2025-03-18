@@ -15,8 +15,7 @@ from typing import Any, List
 from fairseq2.datasets.preference import PreferenceBatch
 from fairseq2.datasets.prompt import PromptBatch
 from fairseq2.gang import Gangs
-from fairseq2.recipes.model import Model
-from fairseq2.recipes.trainer import TrainUnit
+from fairseq2.recipes import Model, TrainUnit
 from vllm import LLM, SamplingParams, RequestOutput, CompletionOutput
 from fairseq2.recipes.lm._online_finetune._common import collate_with_target_mask, find_first_value, GRPOBatch, prepare_preference_batch_random_pair, prepare_grpo_batch
 import re
