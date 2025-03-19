@@ -55,6 +55,7 @@ from fairseq2.recipes.lm._online_finetune._remote_vllm import VllmConfig, Remote
 
 from fairseq2.recipes.lm._online_finetune._common import copy_state, generate_rollouts, GRPOBatch
 from fairseq2.recipes import SequenceMetricBag
+from fairseq2.nn.functional import cross_entropy
 
 @final
 class GrpoFinetuneUnit(TrainUnit[SequenceBatch]):
@@ -179,12 +180,13 @@ class GrpoFinetuneUnit(TrainUnit[SequenceBatch]):
         self, output: SequenceModelOutput, target: SequenceBatch
     ) -> tuple[Tensor, Tensor]:
         assert target.target_mask is not None
-        logprobs = torch.log_softmax(output.logits, dim=-1)
-        per_token_logps = torch.gather(logprobs, -1, target.seqs.unsqueeze(-1)).squeeze(
-            -1
-        )  # [Batch, 1]
+        logit_size = output.logits.size()
+        logits = output.logits.flatten(0,1)
+        targets = target.seqs.flatten(0,1)
+        logps = cross_entropy(logits, targets, pad_idx=None, reduction='none')
+        logps = logps.unflatten(0, logit_size[:2])  # unflat NxT
 
-        return per_token_logps
+        return logps
 
     def _compute_grpo_objective(
         self,
@@ -194,6 +196,12 @@ class GrpoFinetuneUnit(TrainUnit[SequenceBatch]):
         target_batch: SequenceBatch
     ) -> tuple[Tensor, Tensor, Tensor]:
         
+        # if self._gangs.root.rank == 0:
+        #     from pudb.remote import set_trace
+        #     set_trace(host="submit-0", port=6899, term_size=(80*4, 24*4), reverse=True)
+
+        # self._gangs.root.barrier()
+
         logps = self._gather_lprobs(grpo_model_output, target_batch)
         ref_logps = self._gather_lprobs(grpo_ref_model_output, target_batch)
 
@@ -213,13 +221,6 @@ class GrpoFinetuneUnit(TrainUnit[SequenceBatch]):
         target_mask = target_batch.target_mask.view(batch_size, num_rollouts, -1)
 
         per_seq_loss = ((per_token_loss * target_mask).sum(dim=-1) / target_mask.sum(dim=-1)).mean(dim=1)
-
-
-        # if self._gangs.root.rank == 0:
-        #     from pudb.remote import set_trace
-        #     set_trace(host="submit-0", port=6899, term_size=(80*4, 24*4), reverse=True)
-
-        # self._gangs.root.barrier()
 
         return per_seq_loss.sum()
 
@@ -248,7 +249,6 @@ class GrpoFinetuneMetricBag(SequenceMetricBag):
     def __init__(self, gang: Gang) -> None:
         super().__init__(gang)
 
-        # self.register_metric("rollout_logps", Mean(device=gang.device), persistent=False)
         self.register_metric("rollout_lengths", Mean(device=gang.device), persistent=False)
         self.register_metric("grpo_loss", Mean(device=gang.device), persistent=False)
         self.register_metric("avg_reward", Mean(device=gang.device), persistent=False)
@@ -265,25 +265,6 @@ class GrpoFinetuneMetricBag(SequenceMetricBag):
         self.grpo_loss.update(
             loss / batch.batch_size, weight=batch.batch_size
         )
-
-    # @torch.inference_mode()
-    # def update_logps(
-    #     self,
-    #     batch: PromptBatch,
-    #     rollout_logps: Tensor,
-    # ) -> None:
-    #     """Update the Chosen Sequence Log Probabilities and Rejected Sequence Log Probabilities metrics.
-
-    #     :param batch:
-    #         The batch processed by the model.
-    #     :param chosen_logps:
-    #         The log probabilities for each sequence in ``batch.chosen``.
-    #     :param rejected_logps:
-    #         The log probabilities for each sequence in ``batch.rejected``.
-    #     """
-    #     self.rollout_logps.update(
-    #         rollout_logps.sum() / batch.batch_size, weight=batch.batch_size
-    #     )
 
     @torch.inference_mode()
     def update_rollout_lengths(
