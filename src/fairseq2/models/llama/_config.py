@@ -78,7 +78,7 @@ class LLaMAConfig:
     encoder, aiming to increase the context length.
     """
 
-    dropout_p: float = 0.1
+    dropout_p: float = 0.0
     """The dropout probability on outputs of Transformer layers."""
 
 

@@ -100,7 +100,7 @@ class LLaMA3TokenizerHuggingFace(TextTokenizer):
 
     @override
     def create_decoder(self) -> TiktokenDecoder:
-        return HuggingfaceTokenizerDecoder(self._model)
+        return HuggingfaceTokenizerDecoder(self._tokenizer)
 
     @property
     @override
