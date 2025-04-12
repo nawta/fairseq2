@@ -24,7 +24,6 @@ from fairseq2.recipes.metrics import SequenceMetricBag
 import ray
 from ray.util.placement_group import placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
-from transformers import AutoModelForCausalLM
 
 from vllm import LLM, SamplingParams, RequestOutput, CompletionOutput
 import re
