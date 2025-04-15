@@ -14,7 +14,7 @@ from fairseq2.cli.commands.llama import (
     ConvertLLaMACheckpointHandler,
     WriteHFLLaMAConfigHandler,
 )
-from fairseq2.cli.commands.qwen import ConvertQwen25CheckpointHandler
+from fairseq2.cli.commands.qwen import ConvertQwenCheckpointHandler
 from fairseq2.cli.commands.recipe import RecipeCommandHandler
 from fairseq2.context import RuntimeContext
 from fairseq2.data.text.tokenizers import (
@@ -185,11 +185,11 @@ def _register_llama_cli(cli: Cli) -> None:
 
 
 def _register_qwen_cli(cli: Cli) -> None:
-    group = cli.add_group("qwen25", help="LLaMA recipes")
+    group = cli.add_group("qwen", help="LLaMA recipes")
 
     group.add_command(
         name="convert_fs2_to_hf_checkpoint",
-        handler=ConvertQwen25CheckpointHandler(),
+        handler=ConvertQwenCheckpointHandler(),
         help="convert fairseq2 Qwen2.5 checkpoints to HF checkpoints",
     )
 
