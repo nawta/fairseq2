@@ -18,8 +18,6 @@ import fsspec
 from fsspec.implementations.local import LocalFileSystem as fsspec_LocalFileSystem
 from typing_extensions import override
 
-from fairseq2.context import RuntimeContext
-
 
 class FileMode(Enum):
     READ = 0
@@ -327,7 +325,7 @@ class FileSystemRegistry:
         return cls._local_fs
 
 
-def register_filesystems(context: RuntimeContext) -> None:
+def register_filesystems(context) -> None:
     # FIXME: to propagate different credentials
     FileSystemRegistry.register(
         lambda p: str(p).startswith("s3://"),
