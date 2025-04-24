@@ -13,6 +13,8 @@ import torch
 
 from fairseq2.data.text.tokenizers import TextTokenDecoder, TextTokenizer
 from fairseq2.gang import Gang
+
+from fairseq2.logging import log
 from fairseq2.metrics import Mean
 from fairseq2.metrics.text import WerMetric
 from fairseq2.models.asr import AsrModel, AsrModelOutput
@@ -57,16 +59,20 @@ class AsrCriterion:
                 )
             input_batch = batch
 
+        log.info(f"s3: calling forward")
         output = self._forward(input_batch)
 
+        log.info(f"s4: calling loss")
         loss = output.compute_loss(batch.target_seqs, batch.target_padding_mask)
 
         metric_bag.update_ctc_loss(batch, loss)
 
         metric_bag.update_batch_metrics(batch)
 
+        log.info(f"s5: calling scorer")
         if self._scorer is not None:
             self._scorer(batch, output, metric_bag)
+        log.info(f"s6: done scorer")
 
         return loss, batch.batch_size
 
@@ -128,6 +134,11 @@ class AsrScorer:
 
         refs = [self._text_decoder(s) for s in ref_seqs]
         hyps = [self._text_decoder(s) for s in hyp_seqs]
+
+        for r, h in zip(refs, hyps):
+            if torch.rand([]) < 0.01:
+                log.info(f"Reference: {r}")
+                log.info(f"Hypothesis: {h}")
 
         metric_bag.wer.update(
             refs, ref_seqs, ref_padding_mask, hyps, hyp_seqs, hyp_padding_mask

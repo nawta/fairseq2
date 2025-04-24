@@ -266,7 +266,7 @@ def load_wav2vec2_asr_trainer(
 
     # If we start the training with an empty ASR model, use the weights of a
     # pretrained wav2vec 2.0 model.
-    if model.is_empty_initialized:
+    if model.is_empty_initialized and config.pretrained_model.name:
         pt_model = load_reference_model(
             Wav2Vec2Model,
             context,
