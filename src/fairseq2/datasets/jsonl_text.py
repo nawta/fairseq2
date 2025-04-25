@@ -106,7 +106,8 @@ class JsonlTextDataset(TextDataset):
 
         builder.map(encode, num_parallel_calls=npc)
 
-        builder.pack(2 * 8192, pinned_memory=True)
+#        builder.pack(2 * 8192, pinned_memory=True)
+#        builder.pack(8193, pinned_memory=True)
 
         # Shuffle batches.
         if options.batch_shuffle_window != 1:

@@ -125,7 +125,7 @@ class LMTrainConfig:
     common: CommonSection = field(
         default_factory=lambda: CommonSection(
             torch=TorchSection(
-                default_sdpa="torch_flash", compiled_region_activation_memory_budget=0.9
+                default_sdpa="xformers", compiled_region_activation_memory_budget=0.9
             )
         )
     )

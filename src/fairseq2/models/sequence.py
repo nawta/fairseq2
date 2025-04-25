@@ -86,11 +86,11 @@ class SequenceBatch(SupportsDeviceTransfer):
 
     @override
     def to(self, device: Device) -> None:
-        self.seqs = self.seqs.to(device)
+        self.seqs = self.seqs.to(device, non_blocking=True)
         self.seqs_layout = self.seqs_layout.to(device)
 
         if self.target_mask is not None:
-            self.target_mask = self.target_mask.to(device)
+            self.target_mask = self.target_mask.to(device, non_blocking=True)
 
 
 def as_auto_regressive_input(

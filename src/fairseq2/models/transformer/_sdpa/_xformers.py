@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any, final
 
+import torch
 from torch import Tensor
 from typing_extensions import override
 
@@ -57,9 +58,11 @@ class xFormersSDPA(SDPA):
                 "`seqs_layout` and `keys_layout` must be both packed or non-packed."
             )
 
-        bias = self._maybe_get_attention_bias(
-            seqs_layout, keys_layout, seqs.device, bias_cache
-        )
+        from xformers.ops.fmha.attn_bias import LowerTriangularMask
+#        bias = self._maybe_get_attention_bias(
+#            seqs_layout, keys_layout, seqs.device, bias_cache
+#        )
+        bias = LowerTriangularMask(device=seqs.device)
 
         if not self.training:
             dropout_p = 0.0
@@ -92,6 +95,7 @@ class xFormersSDPA(SDPA):
 
         return attns, None
 
+    @torch.compiler.disable
     def _maybe_get_attention_bias(
         self,
         seqs_layout: BatchLayout,
@@ -142,6 +146,12 @@ class xFormersSDPA(SDPA):
                     seqs_layout.seq_lens, keys_layout.seq_lens, device=device
                 )
 
+                torch._dynamo.maybe_mark_dynamic(bias.q_seqinfo.seqstart, 0)
+                torch._dynamo.maybe_mark_dynamic(bias.k_seqinfo.seqstart, 0)
+
+                bias.q_seqinfo.max_seqlen = seqs_layout.shape[1]
+                bias.k_seqinfo.max_seqlen = keys_layout.shape[1]
+
             if isinstance(self.bias, CausalAttentionBias):
                 bias = BlockDiagonalMask.from_seqlens(
                     seqs_layout.seq_lens, keys_layout.seq_lens, device=device
@@ -153,9 +163,15 @@ class xFormersSDPA(SDPA):
                 else:
                     bias = bias.make_local_attention_from_bottomright()
 
-            raise NotSupportedError(
-                f"`xFormersSDPA` supports not support `{self.bias}`."
-            )
+                torch._dynamo.maybe_mark_dynamic(bias.q_seqinfo.seqstart, 0)
+                torch._dynamo.maybe_mark_dynamic(bias.k_seqinfo.seqstart, 0)
+
+                bias.q_seqinfo.max_seqlen = seqs_layout.shape[1]
+                bias.k_seqinfo.max_seqlen = keys_layout.shape[1]
+            else:
+                raise NotSupportedError(
+                    f"`xFormersSDPA` supports not support `{self.bias}`."
+                )
         #        bias = None
         #        if keys_layout.is_padded:
         #            keys_len = keys_layout.shape[1]

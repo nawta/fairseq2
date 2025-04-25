@@ -81,12 +81,12 @@ class PositionEncoder(Module, ABC):
             else:
                 start_step = state_bag.step_nr
 
-            max_seq_len = start_step + seqs_layout.shape[1]
-
-            if max_seq_len > self.max_seq_len:
-                raise ValueError(
-                    f"The input sequence length must be less than or equal to the maximum sequence length ({self.max_seq_len}), but is {max_seq_len} instead."
-                )
+            if not torch.compiler.is_compiling:
+                max_seq_len = start_step + seqs_layout.max_seq_len
+                if max_seq_len > self.max_seq_len:
+                    raise ValueError(
+                        f"The input sequence length must be less than or equal to the maximum sequence length ({self.max_seq_len}), but is {max_seq_len} instead."
+                    )
 
         return self._do_forward(seqs, seqs_layout, state_bag)
 
@@ -388,19 +388,13 @@ class RotaryEncoder(PositionEncoder):
         state_bag: IncrementalStateBag | None,
     ) -> Tensor:
         """:meta private:"""
-#        seq_len = seqs.size(-2)
-
         indices = seqs_layout.get_position_indices()
 
         indices = indices.unsqueeze(1)
 
         if not self.training and state_bag is not None:
             indices = state_bag.step_nr + indices
-#        from fairseq2.logging import log
-#        log.info(f"{seqs.shape}")
-#        log.info(f"{indices.shape}")
         freqs = self.freqs[indices]
-#        log.info(f"{freqs.shape}")
         complex_freqs = torch.view_as_complex(freqs)
 
 
@@ -415,6 +409,28 @@ class RotaryEncoder(PositionEncoder):
         fp32_seqs = torch.view_as_real(complex_seqs).flatten(-2)
 
         return fp32_seqs.type_as(seqs)
+#        seq_len = seqs.size(-2)
+#
+#        if self.training or state_bag is None:
+#            start_step = 0
+#        else:
+#            start_step = state_bag.step_nr
+#
+#        complex_freqs = torch.view_as_complex(self.freqs)
+#
+#        complex_freqs = complex_freqs[start_step : start_step + seq_len]
+#
+#        # (*, S, E) -> (*, S, E / 2, 2)
+#        seqs = seqs.unflatten(-1, (-1, 2))
+#
+#        complex_seqs = torch.view_as_complex(seqs.float())
+#
+#        complex_seqs = complex_seqs * complex_freqs
+#
+#        # (*, S, E / 2, 2) -> (*, S, E)
+#        fp32_seqs = torch.view_as_real(complex_seqs).flatten(-2)
+#
+#        return fp32_seqs.type_as(seqs)
 
 
 class InterpolatedPositionEncoder(Module, ABC):

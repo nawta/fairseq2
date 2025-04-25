@@ -124,9 +124,14 @@ class DataPipelineReader(DataReader[BatchT]):
 
         num_accumulate = self._options.num_accumulate
 
+        from fairseq2.nn import BatchLayout
+        from fairseq2.models.sequence import SequenceBatch
         for idx in range(num_accumulate):
             try:
-                batch = next(self._pipeline_iter)
+                s = torch.randint(0, 100_000, (2, 4097), device=self._gang.device)
+                s_layout = BatchLayout.of(s)
+                batch = SequenceBatch(s, s_layout)
+#                batch = next(self._pipeline_iter)
             except StopIteration:
                 break
             except DataPipelineError as ex:

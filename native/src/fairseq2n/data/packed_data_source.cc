@@ -49,6 +49,10 @@ packed_data_source::next()
             if (ndim != 1)
                 throw_data_pipeline_error(std::move(maybe_example), /*recoverable=*/true,
                     "The input tensors to the pack operation must be one-dimensional.");
+
+            // TODO: fix!
+            if (tensor.size(0) <= 1)
+                continue;
         }
 
         if (!batch.defined()) {

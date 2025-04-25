@@ -16,6 +16,15 @@ from torch.nn.utils.rnn import pad_sequence
 from fairseq2.device import CPU, Device
 
 
+#@final
+#class PackedBatchLayout(BatchLayout):
+#    def __init__(
+#        self,
+#        shape: tuple[int, int],
+#        seq_lens: list[int],
+#    ) -> None:
+
+
 @final
 class BatchLayout:
     _shape: tuple[int, int]
@@ -39,12 +48,12 @@ class BatchLayout:
         self._shape = shape
 
         batch_size, batch_width = shape
-        self._pos_indices = None
+
         if seq_lens is None:
-            if is_packed and batch_size != 1:
-                raise ValueError(
-                    f"The batch size must be 1 for a packed batch, but is {batch_size} instead."
-                )
+#            if is_packed and batch_size != 1:
+#                raise ValueError(
+#                    f"The batch size must be 1 for a packed batch, but is {batch_size} instead."
+#                )
 
             self._seq_lens = [batch_width] * batch_size
 
@@ -72,12 +81,15 @@ class BatchLayout:
 
                     self._max_seq_len = max(self._max_seq_len, seq_len)
 
-                if self._num_elements > batch_width:
+                sz = batch_size * batch_width
+#                if self._num_elements > batch_width:
+                if self._num_elements > sz:
                     raise ValueError(
-                        f"`sum(seq_lens)` must be less than or equal to the batch width ({batch_width}) when the batch is packed, but is {self._num_elements} instead."
+                        "dede"
+#                        f"`sum(seq_lens)` must be less than or equal to the batch width ({batch_width}) when the batch is packed, but is {self._num_elements} instead."
                     )
 
-                self._is_padded = self._num_elements < batch_width
+                self._is_padded = self._num_elements < sz
             else:
                 if len(seq_lens) != batch_size:
                     raise ValueError(
@@ -115,6 +127,30 @@ class BatchLayout:
         self._padding_mask = None
 
         self._device = device
+
+        if self._is_packed:
+            indices = []
+
+            for seq_len in self._seq_lens:
+                indices.append(torch.arange(seq_len, device=self._device))
+
+            self._pos_indices = torch.cat(indices)
+
+            self._pos_indices = self._pos_indices.unsqueeze(0)
+
+            sub = torch.arange(batch_size, device=self._device)
+            sub = sub.repeat_interleave(batch_width)
+
+            self._pos_indices -= sub
+
+            self._pos_indices = self._pos_indices.view(batch_size, batch_width)
+        else:
+            batch_size, batch_width = self._shape
+
+            indices = torch.arange(batch_width, device=self._device)
+
+            # (N) -> (N, S)
+            self._pos_indices = indices.expand(batch_size, -1)
 
     @staticmethod
     def of(
@@ -172,10 +208,12 @@ class BatchLayout:
             if self._is_packed:
                 # (N, S)
                 self._padding_mask = torch.zeros(
-                    (batch_size, batch_width), device=self._device, dtype=torch.bool
+                    (batch_size * batch_width), device=self._device, dtype=torch.bool
                 )
 
                 self._padding_mask[: self._num_elements] = True
+
+                self._padding_mask = self._padding_mask.view(batch_size, batch_width)
             else:
                 # (S)
                 indices = torch.arange(batch_width, device=self._device)
@@ -191,21 +229,23 @@ class BatchLayout:
         return self._padding_mask
 
     def get_position_indices(self) -> Tensor:
-        if self._pos_indices is None:
-            indices = []
-
-            if self._is_packed:
-                for seq_len in self._seq_lens:
-                    indices.append(torch.arange(seq_len, device=self._device))
-
-                self._pos_indices = torch.cat(indices)
-            else:
-                batch_size, batch_width = self._shape
-
-                indices = torch.arange(batch_width, device=self._device)
-
-                # (N) -> (N, S)
-                self._pos_indices = indices.expand(batch_size, -1)
+#        if self._pos_indices is None:
+#            if self._is_packed:
+#                indices = []
+#
+#                for seq_len in self._seq_lens:
+#                    indices.append(torch.arange(seq_len, device=self._device))
+#
+#                self._pos_indices = torch.cat(indices)
+#
+#                self._pos_indices = self._pos_indices.unsqueeze(0)
+#            else:
+#                batch_size, batch_width = self._shape
+#
+#                indices = torch.arange(batch_width, device=self._device)
+#
+#                # (N) -> (N, S)
+#                self._pos_indices = indices.expand(batch_size, -1)
 
         return self._pos_indices
 
